@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Webcam Sevilla — Plaza San Francisco</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --gold: #c9a84c; --gold-light: #e8c97a;
+      --dark: #0d0d0d; --dark2: #161616;
+      --text: #f0ebe0; --muted: #888; --red: #c0392b;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:var(--dark); color:var(--text); font-family:'Lato',sans-serif; min-height:100vh; }
+    header { border-bottom:1px solid #2a2a2a; padding:20px 40px; display:flex; align-items:center; justify-content:space-between; }
+    .logo { font-family:'Playfair Display',serif; font-size:1.3rem; color:var(--gold); letter-spacing:2px; text-transform:uppercase; }
+    .logo span { color:var(--text); font-weight:300; font-size:.9rem; display:block; letter-spacing:4px; margin-top:2px; }
+    .live-badge { display:flex; align-items:center; gap:8px; background:rgba(192,57,43,.15); border:1px solid rgba(192,57,43,.4); padding:6px 16px; border-radius:4px; font-size:.75rem; letter-spacing:3px; text-transform:uppercase; color:#e74c3c; }
+    .live-dot { width:8px; height:8px; background:#e74c3c; border-radius:50%; animation:pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.8)} }
+    .main { max-width:1100px; margin:0 auto; padding:40px 20px 60px; }
+    .title-block { margin-bottom:30px; display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:16px; }
+    h1 { font-family:'Playfair Display',serif; font-size:clamp(1.6rem,4vw,2.8rem); font-weight:700; line-height:1.1; }
+    h1 em { color:var(--gold); font-style:italic; }
+    .subtitle { font-size:.8rem; color:var(--muted); letter-spacing:3px; text-transform:uppercase; margin-top:8px; }
+    .player-wrap { position:relative; background:#000; border-radius:4px; overflow:hidden; border:1px solid #2a2a2a; box-shadow:0 30px 80px rgba(0,0,0,.8); }
+    .player-wrap::before { content:''; position:absolute; top:0;left:0;right:0; height:1px; background:linear-gradient(90deg,transparent,var(--gold),transparent); z-index:2; }
+    video { width:100%; display:block; aspect-ratio:16/9; background:#000; }
+    .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; background:rgba(0,0,0,.9); z-index:10; transition:opacity .4s; padding:20px; text-align:center; }
+    .overlay.hidden { opacity:0; pointer-events:none; }
+    .overlay-text { font-family:'Playfair Display',serif; font-size:1.2rem; margin-bottom:8px; }
+    .overlay-sub { font-size:.8rem; color:var(--muted); max-width:400px; }
+    .spinner { width:40px; height:40px; border:2px solid #2a2a2a; border-top-color:var(--gold); border-radius:50%; animation:spin .8s linear infinite; margin-bottom:20px; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    .info-bar { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:var(--dark2); border:1px solid #2a2a2a; border-top:none; border-radius:0 0 4px 4px; flex-wrap:wrap; gap:12px; }
+    .info-left { display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
+    .info-item { display:flex; align-items:center; gap:6px; font-size:.75rem; color:var(--muted); }
+    .info-item .val { color:var(--text); }
+    .status-dot { width:6px; height:6px; border-radius:50%; background:var(--muted); }
+    .status-dot.ok { background:#27ae60; }
+    .status-dot.loading { background:var(--gold); animation:pulse 1s infinite; }
+    .status-dot.error { background:var(--red); }
+    .btn-group { display:flex; gap:10px; }
+    button { font-family:'Lato',sans-serif; cursor:pointer; border:none; border-radius:3px; font-size:.75rem; letter-spacing:2px; text-transform:uppercase; padding:8px 20px; transition:all .2s; }
+    .btn-primary { background:var(--gold); color:#000; font-weight:700; }
+    .btn-primary:hover { background:var(--gold-light); transform:translateY(-1px); }
+    .btn-secondary { background:transparent; color:var(--muted); border:1px solid #333; }
+    .btn-secondary:hover { border-color:var(--gold); color:var(--gold); }
+    button:disabled { opacity:.4; cursor:not-allowed; transform:none!important; }
+    .token-bar { margin-top:20px; padding:14px 20px; background:var(--dark2); border:1px solid #2a2a2a; border-radius:4px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+    .token-label { font-size:.7rem; text-transform:uppercase; letter-spacing:2px; color:var(--muted); }
+    .token-value { font-size:.72rem; color:var(--gold); font-family:monospace; background:rgba(201,168,76,.08); padding:4px 10px; border-radius:3px; border:1px solid rgba(201,168,76,.2); word-break:break-all; flex:1; margin:0 10px; }
+    .countdown { font-size:.75rem; color:var(--muted); white-space:nowrap; }
+    .countdown span { color:var(--text); font-weight:700; }
+    .auto-row { display:flex; align-items:center; gap:10px; font-size:.75rem; color:var(--muted); }
+    .toggle { position:relative; width:36px; height:20px; cursor:pointer; }
+    .toggle input { opacity:0; width:0; height:0; }
+    .toggle-track { position:absolute; inset:0; background:#333; border-radius:20px; transition:background .2s; }
+    .toggle input:checked + .toggle-track { background:var(--gold); }
+    .toggle-thumb { position:absolute; top:3px; left:3px; width:14px; height:14px; background:white; border-radius:50%; transition:transform .2s; }
+    .toggle input:checked ~ .toggle-thumb { transform:translateX(16px); }
+    .log-block { margin-top:20px; }
+    .log-title { font-size:.7rem; text-transform:uppercase; letter-spacing:3px; color:var(--muted); margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+    .log-title::after { content:''; flex:1; height:1px; background:#2a2a2a; }
+    .log { background:var(--dark2); border:1px solid #2a2a2a; border-radius:4px; padding:14px 16px; font-family:monospace; font-size:.75rem; line-height:1.8; color:var(--muted); max-height:160px; overflow-y:auto; }
+    .log .ts { color:#444; margin-right:8px; }
+    .log .ok { color:#27ae60; }
+    .log .err { color:var(--red); }
+    .log .info { color:var(--gold); }
+    .log .warn { color:#e67e22; }
+    @media(max-width:600px){ header{padding:16px 20px} .info-bar{flex-direction:column;align-items:flex-start} }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Sevilla Live <span>Cámara en directo</span></div>
+  <div class="live-badge"><div class="live-dot"></div>En directo</div>
+</header>
+
+<div class="main">
+  <div class="title-block">
+    <div>
+      <h1>Plaza de <em>San Francisco</em></h1>
+      <div class="subtitle">Sevilla · Centro histórico · Skylinewebcams</div>
+    </div>
+    <div class="auto-row">
+      Auto-renovar
+      <label class="toggle">
+        <input type="checkbox" id="autoRefresh" checked>
+        <div class="toggle-track"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
+  </div>
+
+  <div class="player-wrap">
+    <video id="video" controls muted playsinline></video>
+    <div class="overlay" id="overlay">
+      <div class="spinner"></div>
+      <div class="overlay-text" id="overlayText">Conectando con la cámara...</div>
+      <div class="overlay-sub" id="overlaySub">Obteniendo token de acceso...</div>
+    </div>
+  </div>
+
+  <div class="info-bar">
+    <div class="info-left">
+      <div class="info-item"><div class="status-dot loading" id="statusDot"></div><span id="statusText">Conectando...</span></div>
+      <div class="info-item">📍 <span class="val">Sevilla, España</span></div>
+      <div class="info-item">🔄 <span id="refreshInfo" class="val">—</span></div>
+    </div>
+    <div class="btn-group">
+      <button class="btn-secondary" onclick="toggleMute()" id="muteBtn">🔇 Mute</button>
+      <button class="btn-primary" onclick="loadStream()" id="reloadBtn">↺ Renovar</button>
+    </div>
+  </div>
+
+  <div class="token-bar">
+    <span class="token-label">Stream URL</span>
+    <span class="token-value" id="tokenDisplay">—</span>
+    <span class="countdown" id="countdown">—</span>
+  </div>
+
+  <div class="log-block">
+    <div class="log-title">Registro de eventos</div>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+  // ⚠️ CAMBIA ESTA URL por la de tu servidor en Render una vez desplegado
+  // Ejemplo: const PROXY_URL = 'https://webcam-proxy.onrender.com/get-token';
+  const PROXY_URL = 'https://webcam-proxy.onrender.com/get-token';
+
+  const REFRESH_MS = 4 * 60 * 1000;
+  let hls = null, refreshTimer = null, countdownTimer = null, nextRefreshAt = null, muted = true;
+
+  const $ = id => document.getElementById(id);
+  const video = $('video');
+
+  function addLog(msg, type='info') {
+    const d = document.createElement('div');
+    d.innerHTML = `<span class="ts">[${new Date().toLocaleTimeString('es-ES')}]</span><span class="${type}">${msg}</span>`;
+    $('log').prepend(d);
+    if ($('log').children.length > 50) $('log').lastChild.remove();
+  }
+
+  function setStatus(s, t) { $('statusDot').className='status-dot '+s; $('statusText').textContent=t; }
+  function showOverlay(t, s) { $('overlay').classList.remove('hidden'); $('overlayText').textContent=t; $('overlaySub').textContent=s||''; }
+  function hideOverlay() { $('overlay').classList.add('hidden'); }
+  function toggleMute() { muted=!muted; video.muted=muted; $('muteBtn').textContent=muted?'🔇 Mute':'🔊 Sonido'; }
+
+  function startCountdown() {
+    clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+      if (!nextRefreshAt) return;
+      const s = Math.max(0, Math.round((nextRefreshAt - Date.now()) / 1000));
+      $('countdown').innerHTML = `Renovación en <span>${Math.floor(s/60)}m ${String(s%60).padStart(2,'0')}s</span>`;
+    }, 1000);
+  }
+
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    if (!$('autoRefresh').checked) return;
+    nextRefreshAt = Date.now() + REFRESH_MS;
+    startCountdown();
+    refreshTimer = setTimeout(() => { addLog('Auto-renovando...','info'); loadStream(); }, REFRESH_MS);
+  }
+
+  function playStream(url) {
+    if (hls) { hls.destroy(); hls = null; }
+    if (Hls.isSupported()) {
+      hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(()=>{});
+        hideOverlay();
+        setStatus('ok', 'Reproduciendo en directo');
+        addLog('Stream activo ✓', 'ok');
+        $('reloadBtn').disabled = false;
+        $('refreshInfo').textContent = new Date().toLocaleTimeString('es-ES');
+        scheduleRefresh();
+      });
+      hls.on(Hls.Events.ERROR, (e, d) => {
+        if (d.fatal) {
+          addLog('Error HLS: ' + d.type, 'err');
+          setStatus('error', 'Stream interrumpido — pulsa Renovar');
+          showOverlay('Stream interrumpido', 'Token caducado. Pulsa Renovar.');
+          $('reloadBtn').disabled = false;
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url; video.play();
+      hideOverlay(); setStatus('ok','Reproduciendo'); scheduleRefresh();
+    }
+  }
+
+  async function loadStream() {
+    $('reloadBtn').disabled = true;
+    setStatus('loading', 'Extrayendo token...');
+    showOverlay('Conectando con la cámara...', 'Obteniendo token de acceso...');
+    addLog('Llamando al proxy...', 'info');
+
+    try {
+      const res  = await fetch(PROXY_URL, { signal: AbortSignal.timeout(12000) });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Error desconocido');
+      addLog('Token obtenido ✓', 'ok');
+      $('tokenDisplay').textContent = data.url;
+      showOverlay('Iniciando reproducción...', '');
+      playStream(data.url);
+    } catch (e) {
+      addLog('Error: ' + e.message, 'err');
+      setStatus('error', 'Error de conexión');
+      showOverlay('No se pudo conectar', e.message);
+      $('tokenDisplay').textContent = '— error —';
+      $('reloadBtn').disabled = false;
+    }
+  }
+
+  $('autoRefresh').addEventListener('change', e => {
+    if (e.target.checked) scheduleRefresh();
+    else { clearTimeout(refreshTimer); clearInterval(countdownTimer); $('countdown').textContent='Auto-renovación OFF'; }
+  });
+
+  addLog('Iniciando...', 'info');
+  loadStream();
+</script>
+</body>
+</html>
