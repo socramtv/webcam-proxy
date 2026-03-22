@@ -5,78 +5,82 @@ const cors    = require('cors');
 const app = express();
 app.use(cors());
 
-// Todas las URLs de webcams de skylinewebcams que queramos soportar
-const WEBCAM_PAGES = [
-  'https://andalucialive.com/2022/05/16/webcam-sevilla-03-plaza-san-francisco/',
-  // Añade más páginas aquí si quieres
-];
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'es-ES,es;q=0.9',
+  'Referer': 'https://www.google.com/',
+};
 
-async function extractToken(pageUrl) {
-  const { data: html } = await axios.get(pageUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'es-ES,es;q=0.9',
-      'Referer': 'https://www.google.com/',
-    },
-    timeout: 15000
-  });
+const TOKEN_REGEX = /hd-auth\.skylinewebcams\.com\/live\.m3u8\?a=([a-zA-Z0-9_\-]+)/;
 
-  // Método 1: URL completa del m3u8
-  let match = html.match(/https?:\/\/hd-auth\.skylinewebcams\.com\/live\.m3u8\?a=([a-zA-Z0-9_\-]+)/);
-  if (match) return { token: match[1], method: 1 };
+async function getHtml(url) {
+  const { data } = await axios.get(url, { headers: HEADERS, timeout: 15000 });
+  return data;
+}
 
-  // Método 2: solo el parámetro ?a=
-  match = html.match(/live\.m3u8\?a=([a-zA-Z0-9_\-]+)/);
-  if (match) return { token: match[1], method: 2 };
+async function extractToken() {
+  // Paso 1: cargar la página principal
+  const mainUrl  = 'https://andalucialive.com/2022/05/16/webcam-sevilla-03-plaza-san-francisco/';
+  const mainHtml = await getHtml(mainUrl);
 
-  // Método 3: variable JS skyline o similar
-  match = html.match(/['"](ej[a-zA-Z0-9_\-]{10,})['"]/);
-  if (match) return { token: match[1], method: 3 };
+  // Buscar directamente en la página principal primero
+  let m = mainHtml.match(TOKEN_REGEX);
+  if (m) return { token: m[1], source: 'main' };
 
-  // Método 4: buscar iframe de skylinewebcams y extraer token de src
-  match = html.match(/skylinewebcams\.com[^"']*[?&]a=([a-zA-Z0-9_\-]+)/);
-  if (match) return { token: match[1], method: 4 };
+  // Paso 2: buscar video_embed=XXXX y cargar esa URL
+  const embedMatch = mainHtml.match(/video_embed=(\d+)/);
+  if (embedMatch) {
+    const embedUrl  = `${mainUrl}?video_embed=${embedMatch[1]}`;
+    const embedHtml = await getHtml(embedUrl);
 
-  // Método 5: buscar en scripts inline cualquier token largo alfanumérico cerca de "skyline"
-  const skylineIdx = html.indexOf('skyline');
-  if (skylineIdx !== -1) {
-    const fragment = html.substring(Math.max(0, skylineIdx - 200), skylineIdx + 500);
-    match = fragment.match(/[a-z0-9]{20,40}/);
-    if (match) return { token: match[0], method: 5 };
+    m = embedHtml.match(TOKEN_REGEX);
+    if (m) return { token: m[1], source: 'embed' };
+
+    // Paso 3: buscar iframe src de skylinewebcams dentro del embed
+    const iframeMatch = embedHtml.match(/src=["'](https?:\/\/[^"']*skylinewebcams[^"']+)["']/i);
+    if (iframeMatch) {
+      const iframeHtml = await getHtml(iframeMatch[1]);
+      m = iframeHtml.match(TOKEN_REGEX);
+      if (m) return { token: m[1], source: 'iframe' };
+    }
+
+    // Paso 4: buscar cualquier URL de skyline en el embed
+    const skylineMatch = embedHtml.match(/https?:\/\/[^"'\s]*skylinewebcams[^"'\s]*/i);
+    if (skylineMatch) {
+      const skylineHtml = await getHtml(skylineMatch[0]);
+      m = skylineHtml.match(TOKEN_REGEX);
+      if (m) return { token: m[1], source: 'skyline' };
+    }
+
+    return { token: null, debug: embedHtml.substring(0, 3000) };
   }
 
-  // Si nada funciona, devolver el HTML para debug
-  return { token: null, htmlSnippet: html.substring(0, 2000) };
+  return { token: null, debug: mainHtml.substring(0, 3000) };
 }
 
 app.get('/get-token', async (req, res) => {
-  const pageUrl = req.query.url || WEBCAM_PAGES[0];
   try {
-    const result = await extractToken(pageUrl);
+    const result = await extractToken();
     if (result.token) {
-      const streamUrl = `https://hd-auth.skylinewebcams.com/live.m3u8?a=${result.token}`;
-      res.json({ ok: true, url: streamUrl, token: result.token, method: result.method });
+      res.json({
+        ok: true,
+        url: `https://hd-auth.skylinewebcams.com/live.m3u8?a=${result.token}`,
+        token: result.token,
+        source: result.source
+      });
     } else {
-      res.json({ ok: false, error: 'Token no encontrado', debug: result.htmlSnippet });
+      res.json({ ok: false, error: 'Token no encontrado', debug: result.debug });
     }
   } catch (e) {
     res.json({ ok: false, error: e.message });
   }
 });
 
-// Ruta de diagnóstico: ver el HTML crudo de la página
 app.get('/debug', async (req, res) => {
-  const pageUrl = req.query.url || WEBCAM_PAGES[0];
+  const url = req.query.url || 'https://andalucialive.com/2022/05/16/webcam-sevilla-03-plaza-san-francisco/?video_embed=7478';
   try {
-    const { data: html } = await axios.get(pageUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept-Language': 'es-ES,es;q=0.9',
-      },
-      timeout: 15000
-    });
-    // Devolver los primeros 5000 caracteres para inspeccionar
+    const html = await getHtml(url);
     res.type('text/plain').send(html.substring(0, 5000));
   } catch (e) {
     res.type('text/plain').send('Error: ' + e.message);
